@@ -1,0 +1,92 @@
+# An illustrative dehydration/rehydration sequence, not a verified mechanism.
+# No intermediate XYZ or user-chosen atom identifiers are required.
+# From the source root, install the driver extra: pip install -e ".[mapping]"
+template_dir: ../elementary_reaction/templates
+output_dir: ./outputs
+dispatch: local
+charge: 0
+multiplicity: 1
+max_cores: 4
+executables: {orca: /path/to/orca}
+
+mechanism:
+  conformers: 8
+  seed: 42
+  fragment_gap_angstrom: 3.0
+  stages:
+    - name: dehydration
+      reactant:
+        sources:
+          - smiles: 'OC(O)'
+        steps:
+          - step: 1
+            name: reactant_minimum
+            engine: orca
+            template: minimum.inp
+      product:
+        # Complete products: formaldehyde AND water; no atoms disappear.
+        smiles: 'C=O.O'
+        steps:
+          - step: 1
+            name: product_minimum
+            engine: orca
+            template: minimum.inp
+      ts_guesser:
+        method: idpp
+        n_images: 17
+        scoring_steps:
+          - step: 1
+            engine: mlip
+            operation: sp
+            template: score.py
+            options: {task_name: omol, device: cpu}
+      ts_steps:
+        - step: 1
+          name: saddle
+          engine: orca
+          template: ts.inp
+        - step: 2
+          name: frequencies
+          engine: orca
+          template: freq.inp
+
+    - name: rehydration
+      reactant:
+        sources:
+          # Resolve this selection AFTER dehydration's product optimization.
+          # Reuse its optimized coordinates and internally tracked atom identities.
+          - from: dehydration
+            select_smiles: 'C=O'
+          # The first water stays recorded in dehydration and is not carried forward.
+          # Every new smiles source receives fresh identities, even for the same molecule.
+          - smiles: 'O'
+        steps:
+          - step: 1
+            name: reactant_minimum
+            engine: orca
+            template: minimum.inp
+      product:
+        smiles: 'OC(O)'
+        steps:
+          - step: 1
+            name: product_minimum
+            engine: orca
+            template: minimum.inp
+      ts_guesser:
+        method: idpp
+        n_images: 17
+        scoring_steps:
+          - step: 1
+            engine: mlip
+            operation: sp
+            template: score.py
+            options: {task_name: omol, device: cpu}
+      ts_steps:
+        - step: 1
+          name: saddle
+          engine: orca
+          template: ts.inp
+        - step: 2
+          name: frequencies
+          engine: orca
+          template: freq.inp

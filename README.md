@@ -115,6 +115,19 @@ The [tutorials](https://sterling-group.github.io/ChemRefine/tutorials/) work
 through complete studies — conformer sampling, transition states, docking and
 more.
 
+Elementary-reaction workflows can now prepare reactant and product endpoints,
+generate TS guesses, and run a separate TS refinement pipeline. See the
+[reaction guide](docs/tutorials/elementary-reactions.md) and
+[example](examples/elementary_reaction/input.yaml).
+
+Linked mechanisms can select an optimized intermediate by SMILES at runtime,
+exclude byproducts from the next stage, and add new reagents. Every product,
+including the first, can be assembled from a reactive core while retaining
+omitted catalyst ligands and substrate substituents. See the
+[mechanism guide](docs/tutorials/linked-reactions.md) and
+[example](examples/linked_reactions/input.yaml), or the
+[all-core mechanism](examples/product_core_from_start/input.yaml).
+
 ## Citation
 
 <!-- --8<-- [start:citation] -->

@@ -89,7 +89,7 @@ class ValidationIssue:
     (``("steps", 1, "options")``) — so a GUI walks it to the field to highlight and an
     agent quotes it verbatim. ``kind`` is a short machine-checkable class of finding
     (``yaml`` / ``io`` / ``legacy`` / a pydantic error type / ``deprecated`` /
-    ``executable`` / ``input`` / ``engine`` / ``options`` /
+    ``executable`` / ``input`` / ``engine`` / ``options`` / ``chemistry`` /
     ``backend`` / ``preflight`` / ``operation`` / ``nms`` / ``template`` /
     ``whitespace-path`` / ``budget`` / ``slurm-header``); the message alone is for
     humans.
@@ -188,6 +188,99 @@ def validate_config_text(text: str, *, base_dir: Path | None = None) -> Validati
     except ConfigError as e:
         # The legacy normalizer refuses some v1 spellings before pydantic runs.
         return _failed("legacy", str(e))
+    if config.mechanism is not None:
+        from chemrefine.mechanism import plan as mechanism_plan
+        from chemrefine.reaction import branches
+
+        mechanism_issues: list[ValidationIssue] = []
+        mechanism_warnings = list(deprecations)
+        try:
+            stages = mechanism_plan(config)
+        except ConfigError as exc:
+            return ValidationReport(
+                issues=(
+                    ValidationIssue(
+                        loc=("mechanism",),
+                        kind="chemistry",
+                        message=str(exc),
+                    ),
+                ),
+                warnings=tuple(mechanism_warnings),
+                config=None,
+            )
+        for index, item in enumerate(stages):
+            for name, branch in branches(item.config).items():
+                stage_issues, stage_warnings = _inspect_steps(branch)
+                stage_prefix = ("mechanism", "stages", index, name)
+                mechanism_issues.extend(
+                    dataclasses.replace(i, loc=stage_prefix + i.loc) for i in stage_issues
+                )
+                mechanism_warnings.extend(
+                    dataclasses.replace(i, loc=stage_prefix + i.loc) for i in stage_warnings
+                )
+            paths = [
+                item.stage.reactant.input,
+                item.stage.product.input,
+                item.stage.product.core.input if item.stage.product.core is not None else None,
+                *(s.input for s in item.stage.reactant.sources),
+            ]
+            for path in paths:
+                if path is not None and not io.file_there(path):
+                    mechanism_warnings.append(
+                        ValidationIssue(
+                            loc=("mechanism", "stages", index),
+                            kind="input",
+                            message=f"geometry {path} does not exist yet; a run requires it",
+                        )
+                    )
+        mechanism_warnings.extend(
+            ValidationIssue(loc=("executables", tool), kind="executable", message=warning)
+            for tool, warning in config.missing_executables()
+        )
+        return ValidationReport(
+            issues=tuple(mechanism_issues),
+            warnings=tuple(mechanism_warnings),
+            config=None if mechanism_issues else config,
+        )
+    if config.reaction is not None:
+        from chemrefine.reaction import branches
+
+        reaction_issues: list[ValidationIssue] = []
+        reaction_warnings = list(deprecations)
+        for name, branch in branches(config).items():
+            branch_issues, branch_warnings = _inspect_steps(branch)
+            prefix: tuple[str | int, ...] = ("reaction", name)
+            if name == "scoring":
+                prefix = ("reaction", "ts_guesser", "scoring_steps")
+            elif name == "ts":
+                prefix = ("reaction", "ts_steps")
+            reaction_issues.extend(
+                dataclasses.replace(i, loc=prefix + i.loc) for i in branch_issues
+            )
+            reaction_warnings.extend(
+                dataclasses.replace(i, loc=prefix + i.loc) for i in branch_warnings
+            )
+            if (
+                name in ("reactant", "product")
+                and branch.input is not None
+                and not io.file_there(branch.input)
+            ):
+                reaction_warnings.append(
+                    ValidationIssue(
+                        loc=("reaction", name, "input"),
+                        kind="input",
+                        message=f"endpoint {branch.input} does not exist yet; a run requires it",
+                    )
+                )
+        reaction_warnings.extend(
+            ValidationIssue(loc=("executables", tool), kind="executable", message=warning)
+            for tool, warning in config.missing_executables()
+        )
+        return ValidationReport(
+            issues=tuple(reaction_issues),
+            warnings=tuple(reaction_warnings),
+            config=config if not reaction_issues else None,
+        )
     issues_list, warnings_list = _inspect_steps(config)
     # A report row, not only the load-time log line: `chemrefine validate`, the GUI and
     # every MCP client read this report and nothing else, and a log-only warning would

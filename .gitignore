@@ -122,3 +122,6 @@ __pycache__/
 
 # Machine-local paths for scripts/release-check.sh (PY / LIVE_PY / ORCA).
 scripts/release-check.env
+
+# Local calculation runs
+/runs/

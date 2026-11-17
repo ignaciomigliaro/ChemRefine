@@ -87,6 +87,288 @@ class Mutation:
 
 _BUNDLED: tuple[Mutation, ...] = (
     Mutation(
+        id="mechanism-product-core-starting-anchor-comes-from-reactants",
+        path="src/chemrefine/core_workflow.py",
+        old="anchor_ids=carried_ids or set(mechanism.maps(reactant)),",
+        new="anchor_ids=carried_ids,",
+        tests="tests/test_core_workflow.py",
+        breaks="the first product core cannot inherit its catalyst from the starting reactants",
+    ),
+    Mutation(
+        id="mechanism-product-core-inherited-orientation-follows-conserved-bonds",
+        path="src/chemrefine/product_core.py",
+        old="guides.add(index)",
+        new="pass",
+        tests="tests/test_product_core.py",
+        breaks="an omitted alkyne H or R stays in the old frame and bends a linear triple bond",
+    ),
+    Mutation(
+        id="mechanism-product-core-equivalent-mappings-preserve-hydrogens",
+        path="src/chemrefine/product_core.py",
+        old="if existing is None or edits < existing.edits:",
+        new="if existing is None or edits > existing.edits:",
+        tests="tests/test_product_core.py",
+        breaks="a proton-transfer core needlessly exchanges the unreacting alkyne hydrogen",
+    ),
+    Mutation(
+        id="mechanism-product-core-inherits-optimized-coordinates",
+        path="src/chemrefine/mechanism.py",
+        old='products[stage.name] = (item.product, prepared["product"])',
+        new="products[stage.name] = (item.product, "
+        + "io.read_xyz_frames(cfg.reaction.product.input)[0])",
+        tests="tests/test_core_workflow.py",
+        breaks="a later product inherits an unoptimized seed instead of its optimized parent",
+    ),
+    Mutation(
+        id="mechanism-product-core-preserves-omitted-attachments",
+        path="src/chemrefine/product_core.py",
+        old="changed = dict(original)",
+        new="changed = {}",
+        tests="tests/test_product_core.py",
+        breaks="omitted spectator ligands and substituents lose their attachment bonds",
+    ),
+    Mutation(
+        id="mechanism-product-core-rejects-invalid-valences",
+        path="src/chemrefine/product_core.py",
+        old="if not _valid_valences(product):",
+        new="if False:",
+        tests="tests/test_product_core.py",
+        breaks="an overbonded reacting carbon is accepted as a product candidate",
+    ),
+    Mutation(
+        id="mechanism-product-core-validates-coordination",
+        path="src/chemrefine/product_core.py",
+        old="if changed and not allow_contact_changes:",
+        new="if False:",
+        tests="tests/test_product_core.py",
+        breaks="a lost ligand or unintended bond survives endpoint validation",
+    ),
+    Mutation(
+        id="mechanism-product-core-anchor-is-carried",
+        path="src/chemrefine/product_core.py",
+        old="if i == anchor and anchor_ids is not None:",
+        new="if False:",
+        tests="tests/test_core_workflow.py",
+        breaks="a newly added metal reagent silently impersonates the inherited catalyst",
+    ),
+    Mutation(
+        id="mechanism-product-core-branches-share-ancestry",
+        path="src/chemrefine/core_workflow.py",
+        old="if not compatible:",
+        new="if False:",
+        tests="tests/test_core_workflow.py",
+        breaks="a merged mechanism combines products from incompatible chemical branches",
+    ),
+    Mutation(
+        id="mechanism-product-core-settings-key-resume",
+        path="src/chemrefine/core_workflow.py",
+        old='core.model_dump(mode="json", exclude={"input"})',
+        new="{}",
+        tests="tests/test_core_workflow.py",
+        breaks="changed assembly settings reuse a previous chemistry namespace",
+    ),
+    Mutation(
+        id="mechanism-product-core-retains-graph-validation-mode",
+        path="src/chemrefine/mechanism.py",
+        old='result.SetBoolProp("connectivity_only", mol.GetBoolProp("connectivity_only"))',
+        new="pass",
+        tests="tests/test_core_workflow.py",
+        breaks="reordering erases whether a graph establishes formal charges",
+    ),
+    Mutation(
+        id="mechanism-single-product-handoff-is-unambiguous",
+        path="src/chemrefine/mechanism.py",
+        old="if smiles is None and len(components) != 1:",
+        new="if False:",
+        tests="tests/test_mechanism.py",
+        breaks="an unspecified intermediate silently selects the first molecule "
+        "of a multi-product reaction",
+    ),
+    Mutation(
+        id="mechanism-final-geometries-are-refined",
+        path="src/chemrefine/mechanism.py",
+        old="transition_states=stage_outcomes[-1].state.structures,",
+        new="transition_states=stage_outcomes[0].state.structures,",
+        tests="tests/test_mechanism_report.py",
+        breaks="the final mechanism presents a prepared endpoint as the refined TS geometry",
+    ),
+    Mutation(
+        id="master-variant-exceptions-stay-local",
+        path="src/chemrefine/mechanism_batch.py",
+        old="override = settings.variant_overrides.get(name)",
+        new="override = next(iter(settings.variant_overrides.values()), None)",
+        tests="tests/test_mechanism_batch.py",
+        breaks="the CuI2-only contact exception leaks into the other catalyst mechanisms",
+    ),
+    Mutation(
+        id="master-broad-contact-override-reaches-endpoints",
+        path="src/chemrefine/mechanism.py",
+        old='label=f"{current.stage.name} optimized {name}",\n'
+        "                    allow_metal_changes=settings.force,\n"
+        "                    allow_contact_changes=settings.force_endpoint_contacts,",
+        new='label=f"{current.stage.name} optimized {name}",\n'
+        "                    allow_metal_changes=settings.force,\n"
+        "                    allow_contact_changes=False,",
+        tests="tests/test_core_workflow.py",
+        breaks="the master CuI2 exception is recorded but cannot pass "
+        "the I-O endpoint contact check",
+    ),
+    Mutation(
+        id="master-broad-contact-cache-is-distinct",
+        path="src/chemrefine/core_workflow.py",
+        old='identity_data["force_endpoint_contacts"] = True',
+        new="pass",
+        tests="tests/test_core_workflow.py",
+        breaks="broadly forced endpoints share the strict mechanism's cache namespace",
+    ),
+    Mutation(
+        id="force-never-ignores-ordinary-bond-changes",
+        path="src/chemrefine/product_core.py",
+        old="if not (is_metal(int(atoms.numbers[a])) or is_metal(int(atoms.numbers[b])))",
+        new="if False",
+        tests="tests/test_product_core.py",
+        breaks="forcing a metal-contact change silently accepts new ordinary bonds such as I-O",
+    ),
+    Mutation(
+        id="force-reaches-endpoint-validator",
+        path="src/chemrefine/mechanism.py",
+        old='label=f"{current.stage.name} optimized {name}",\n'
+        "                    allow_metal_changes=settings.force,",
+        new='label=f"{current.stage.name} optimized {name}",\n'
+        "                    allow_metal_changes=False,",
+        tests="tests/test_core_workflow.py",
+        breaks="the YAML force option exists but optimized metal contacts are still rejected",
+    ),
+    Mutation(
+        id="force-core-cache-namespace-is-distinct",
+        path="src/chemrefine/core_workflow.py",
+        old='identity_data["force_metal_coordination"] = True',
+        new="pass",
+        tests="tests/test_core_workflow.py",
+        breaks="forced assembly candidates overwrite the strict workflow's chemistry namespace",
+    ),
+    Mutation(
+        id="directory-variants-distinct-output-names",
+        path="src/chemrefine/mechanism_batch.py",
+        old="if len({variant.name for variant in result}) != len(result):",
+        new="if False:",
+        tests="tests/test_mechanism_batch.py",
+        breaks="two distinct reactant combinations overwrite the same cache "
+        "and calculation outputs",
+    ),
+    Mutation(
+        id="directory-variants-divide-total-core-budget",
+        path="src/chemrefine/mechanism_batch.py",
+        old='"max_cores": config.max_cores // workers,',
+        new='"max_cores": config.max_cores,',
+        tests="tests/test_mechanism_batch.py",
+        breaks="each parallel catalyst spends the entire batch CPU budget, "
+        "oversubscribing the machine",
+    ),
+    Mutation(
+        id="directory-variants-replace-source-independently",
+        path="src/chemrefine/mechanism_batch.py",
+        old='update={"input": path, "input_dir": None}',
+        new='update={"input": paths[0], "input_dir": None}',
+        tests="tests/test_mechanism_batch.py",
+        breaks="a second independent reagent directory silently reuses "
+        "the first directory's structure",
+    ),
+    Mutation(
+        id="directory-variants-report-individual-failure",
+        path="src/chemrefine/mechanism_batch.py",
+        old='"status": "refinement_completed" if process.returncode == 0 else "failed",',
+        new='"status": "refinement_completed",',
+        tests="tests/test_mechanism_batch.py",
+        breaks="a failed catalyst variant is presented as successfully refined",
+    ),
+    Mutation(
+        id="geometry-perception-respects-organic-valence",
+        path="src/chemrefine/product_core.py",
+        old="matrix[len(edges) + np.array([a, b]), column] = order - 1",
+        new="matrix[len(edges) + np.array([a, b]), column] = 0",
+        tests="tests/test_product_core.py",
+        breaks="aromatic ligand carbons are assigned multiple double bonds beyond carbon valence",
+    ),
+    Mutation(
+        id="geometry-perception-distinguishes-sigma-from-pi",
+        path="src/chemrefine/product_core.py",
+        old="        if not pi_contact:\n            orders[index] = 1",
+        new="        if False:\n            orders[index] = 1",
+        tests="tests/test_product_core.py",
+        breaks="sigma metal-carbon bonds consume no carbon valence, admitting the wrong "
+        "alkyne-carbon correspondence and duplicate pathways",
+    ),
+    Mutation(
+        id="geometry-metal-selection-is-catalyst-independent",
+        path="src/chemrefine/mechanism.py",
+        old="if any(product_core.is_metal(atom.GetAtomicNum()) for atom in component.GetAtoms())",
+        new="if True",
+        tests="tests/test_mechanism.py",
+        breaks="the catalyst selector also selects water and cannot carry a catalyst through "
+        "a byproduct-generating stage",
+    ),
+    Mutation(
+        id="mechanism-report-output-matches-selected-job",
+        path="src/chemrefine/mechanism_report.py",
+        old='output = jobs.get(structure.id, jobs.get(structure.parent_id or ""))',
+        new='output = jobs.get(structure.parent_id or "", jobs.get(structure.id))',
+        tests="tests/test_mechanism_report.py",
+        breaks="a selected stationary point is paired with its parent's different output "
+        "and the displayed frequencies describe the wrong calculation",
+    ),
+    Mutation(
+        id="mechanism-report-endpoint-frequency-branch",
+        path="src/chemrefine/mechanism.py",
+        old="stage_outcomes[offset - 1].state.structures[0],",
+        new="stage_outcomes[0].state.structures[0],",
+        tests="tests/test_mechanism_report.py",
+        breaks="the product geometry is paired with the reactant's frequency summary",
+    ),
+    Mutation(
+        id="mechanism-final-results-invalidated-before-rerun",
+        path="src/chemrefine/mechanism.py",
+        old="        mechanism_report.begin(config.output_dir)\n",
+        new="        pass\n",
+        tests="tests/test_mechanism_report.py",
+        breaks="a failed rerun leaves obsolete final geometries labeled as completed results",
+    ),
+    Mutation(
+        id="mapping-fresh-reagents-never-recycle-identities",
+        path="src/chemrefine/atom_mapping.py",
+        old="new = old if old in retained else self.fresh()",
+        new="new = old if old else self.fresh()",
+        tests="tests/test_atom_mapping.py",
+        breaks="a newly introduced reagent reuses a discarded byproduct's identities, "
+        "so the following reaction silently tracks the wrong atoms",
+    ),
+    Mutation(
+        id="mapping-preserves-elements",
+        path="src/chemrefine/atom_mapping.py",
+        old="if source.GetAtomicNum() != target.GetAtomicNum():",
+        new="if False:",
+        tests="tests/test_atom_mapping.py",
+        breaks="a model proposal maps carbon onto oxygen and submits a path "
+        "whose endpoints no longer describe the same atoms",
+    ),
+    Mutation(
+        id="mapping-hydrogen-routing-is-unambiguous",
+        path="src/chemrefine/atom_mapping.py",
+        old="if len(donor_groups) > 1 and len(acceptor_groups) > 1:",
+        new="if False:",
+        tests="tests/test_atom_mapping.py",
+        breaks="an ambiguous proton transfer is silently assigned an arbitrary pathway",
+    ),
+    Mutation(
+        id="mechanism-validates-optimized-connectivity",
+        path="src/chemrefine/mechanism.py",
+        old="        if not compatible:\n",
+        new="        if False:\n",
+        tests="tests/test_mechanism.py",
+        breaks="an endpoint that optimized into another molecule is accepted "
+        "as the declared intermediate and passed into the next reaction",
+    ),
+    Mutation(
         id="nms-is-resolved",
         path="src/chemrefine/nms.py",
         old="len(child.imaginary_freqs) == target",
@@ -1020,10 +1302,13 @@ MUTATIONS: tuple[Mutation, ...] = (*_BUNDLED, *engine_mutations(REPO))
 #: top-level files the prose links to.
 #: An incomplete copy fails on its own, which :func:`_assert_baseline_is_green` catches
 #: whatever the missing input turns out to be — it is how each of these earned its entry.
+#: The TS linker is an executable delivered with its own contract tests; copy only
+#: that script, keeping this gate absent so its anchor tests remain repo-only.
 _INPUTS = (
     "src",
     "tests",
     "examples",
+    "scripts/ts_guess.py",
     "docs",
     "README.md",
     "pyproject.toml",
@@ -1041,6 +1326,7 @@ def _copy_tree(dest: Path) -> None:
         if source.is_dir():
             shutil.copytree(source, dest / name, ignore=shutil.ignore_patterns("__pycache__"))
         else:
+            (dest / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest / name)
 
 

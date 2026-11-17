@@ -140,6 +140,8 @@ nav:
       - Upgrading from v1: get-started/upgrading-from-v1.md
   - Tutorials:
       - tutorials/index.md
+      - Elementary reactions: tutorials/elementary-reactions.md
+      - Linked mechanisms: tutorials/linked-reactions.md
       - Conformer sampling: tutorials/conformer_sampling.md
       - Transition states: tutorials/ts_finding.md
       - Host-guest docking: tutorials/host_guest.md

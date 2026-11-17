@@ -1,0 +1,4 @@
+! ExtOpt Opt
+%geom
+ MaxIter 100
+end

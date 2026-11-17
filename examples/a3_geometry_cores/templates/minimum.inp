@@ -1,0 +1,4 @@
+! ExtOpt Opt TightOpt NumFreq
+%geom
+  MaxIter 200
+end

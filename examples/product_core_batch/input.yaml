@@ -1,0 +1,61 @@
+# One mechanism template, two independent catalyst XYZs, two parallel CPU workers.
+template_dir: ../product_core/templates
+output_dir: ./outputs
+dispatch: local
+max_cores: 2
+charge: 0
+multiplicity: 1
+executables:
+  orca: /path/to/orca
+mechanism:
+  max_candidates: 16
+  stages:
+  - name: oxidative_addition
+    reactant:
+      sources:
+      - input_dir: reactants
+      steps: &id001
+      - step: 1
+        name: minimum
+        engine: mlip-extopt
+        template: minimum.inp
+        options: &id002
+          task_name: omol
+          model_name: uma-s-1p2
+          device: cpu
+    product:
+      core:
+        input: ../product_core_from_start/oxidative_addition_core.xyz
+        anchor: 1
+        placements: 8
+      steps: *id001
+    ts_guesser: &id003
+      method: idpp
+      n_images: 7
+      scoring_steps:
+      - step: 1
+        engine: mlip-extopt
+        operation: sp
+        template: single_point.inp
+        options: *id002
+    ts_steps: &id004
+    - step: 1
+      name: saddle
+      engine: mlip-extopt
+      template: ts.inp
+      options: *id002
+  - name: reductive_elimination
+    reactant:
+      sources:
+      - from: oxidative_addition
+      steps: *id001
+    product:
+      core:
+        input: ../product_core/product_core.xyz
+        anchor: 1
+        placements: 8
+      steps: *id001
+    ts_guesser: *id003
+    ts_steps: *id004
+  parallel_runs: 2
+max_gpus: 0

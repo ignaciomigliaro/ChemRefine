@@ -53,7 +53,32 @@ assert _ORCA_FAMILY, "the ORCA family derives empty — the example gates would 
 
 def _seed_path(cfg: Config) -> Path:
     """The pipeline's seed input: explicit ``input:`` or the step-1 default."""
+    if cfg.mechanism is not None:
+        from chemrefine.mechanism import plan
+
+        return plan(cfg)[0].config.reaction.reactant.input
+    if cfg.reaction is not None:
+        return cfg.reaction.reactant.input
     return Path(cfg.input) if cfg.input is not None else cfg.template_dir / "step1.xyz"
+
+
+def _steps(cfg: Config) -> list[StepConfig]:
+    """Inspect calculation steps in every reaction branch as well as linear workflows."""
+    if cfg.mechanism is not None:
+        from chemrefine.mechanism import plan
+        from chemrefine.reaction import branches
+
+        return [
+            step
+            for item in plan(cfg)
+            for branch in branches(item.config).values()
+            for step in branch.steps
+        ]
+    if cfg.reaction is None:
+        return cfg.steps
+    from chemrefine.reaction import branches
+
+    return [step for branch in branches(cfg).values() for step in branch.steps]
 
 
 def _requests_gpu(step: StepConfig) -> bool:
@@ -99,7 +124,25 @@ def test_example_loads(yml: Path) -> None:
 def test_example_seed_exists_and_parses(yml: Path) -> None:
     """The seed input must exist and yield at least one structure."""
     cfg = load_config(yml)
+    if cfg.mechanism is not None:
+        from chemrefine.mechanism import plan
+
+        for item in plan(cfg):
+            assert item.reactant.GetNumAtoms() and item.product.GetNumAtoms()
+            for path in [
+                item.stage.reactant.input,
+                item.stage.product.input,
+                *(s.input for s in item.stage.reactant.sources),
+            ]:
+                if path is not None:
+                    assert path.is_file() and read_xyz_frames(path)
+        return
     seed = _seed_path(cfg)
+    if cfg.reaction is not None:
+        product = cfg.reaction.product.input
+        assert product.exists() and read_xyz_frames(product), (
+            f"product seed missing/empty: {product}"
+        )
     assert seed.exists(), f"seed input missing: {seed}"
     if seed.is_dir():
         assert list(seed.glob("*.xyz")), f"seed directory holds no .xyz files: {seed}"
@@ -124,7 +167,7 @@ def test_example_step_templates_resolve(yml: Path) -> None:
     the suite green while the tutorial failed on a user's first run.
     """
     cfg = load_config(yml)
-    for step in cfg.steps:
+    for step in _steps(cfg):
         template = _resolved_template(cfg, step)
         assert template is None or template.is_file(), (
             f"step {step.step}: template {template} does not exist"
@@ -146,7 +189,7 @@ def test_no_example_step_draws_an_operation_notice(yml: Path) -> None:
     shipped step names no run kind its engine has no reader for, either.
     """
     cfg = load_config(yml)
-    for step in cfg.steps:
+    for step in _steps(cfg):
         engine = get_engine(step.engine)
         if not isinstance(engine, TemplateDriven):
             continue
@@ -159,7 +202,7 @@ def test_no_example_step_draws_an_operation_notice(yml: Path) -> None:
 def test_example_slurm_headers_exist(yml: Path) -> None:
     """Each step's SLURM header (explicit, cuda-for-GPU, or global) must ship."""
     cfg = load_config(yml)
-    for step in cfg.steps:
+    for step in _steps(cfg):
         if step.slurm_template:
             header = step.slurm_template
         elif _requests_gpu(step):
@@ -174,7 +217,7 @@ def test_example_slurm_headers_exist(yml: Path) -> None:
 def test_example_nms_steps_compute_frequencies(yml: Path) -> None:
     """`nms: true` steps must run a frequency calculation (the B9 gate)."""
     cfg = load_config(yml)
-    for step in cfg.steps:
+    for step in _steps(cfg):
         if not step.nms or step.engine not in _ORCA_FAMILY:
             continue
         template = _resolved_template(cfg, step)
@@ -193,7 +236,7 @@ def test_example_scan_indices_fit_seed(yml: Path) -> None:
     if seed.suffix != ".xyz" or not seed.is_file():
         return
     n_atoms = len(read_xyz_frames(seed)[0])
-    for step in cfg.steps:
+    for step in _steps(cfg):
         if step.step != 1 or step.engine not in _ORCA_FAMILY:
             continue
         template = _resolved_template(cfg, step)
@@ -211,7 +254,7 @@ def test_example_scan_indices_fit_seed(yml: Path) -> None:
 def test_example_docker_guest_ships(yml: Path) -> None:
     """A %DOCKER template's GUEST file must ship with the example's templates."""
     cfg = load_config(yml)
-    for step in cfg.steps:
+    for step in _steps(cfg):
         if step.engine not in _ORCA_FAMILY:
             continue
         template = _resolved_template(cfg, step)
@@ -261,6 +304,8 @@ REQUIRED = {
         "slurm_template",
         "executables",
         "steps",
+        "reaction",
+        "mechanism",
     },
     "step": {
         "step",

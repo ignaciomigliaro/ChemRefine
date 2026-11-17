@@ -3533,3 +3533,56 @@ def test_the_run_summary_survives_an_unreadable_lock():
       ]));
     """)
     assert json.loads(out) == ["running (pid 42)", "running (unreadable lock)", "idle", ""]
+
+
+def test_reaction_setup_preserves_steps_and_edits_all_branches():
+    """Converting the form keeps existing steps as TS refinement and emits valid settings."""
+    result = _run_component_in_node("""
+      global.jsyaml = { dump: JSON.stringify, load: JSON.parse };
+      const b = builder();
+      b.syncYaml = () => {};
+      b.cfg = { input: 'mapped.xyz', steps: [{step: 1, engine: 'orca', template: 'ts.inp'}] };
+      b.addReaction();
+      if (b.cfg.input !== undefined || b.cfg.steps.length !== 0) throw Error('mixed workflow');
+      if (b.cfg.reaction.reactant.input !== 'mapped.xyz') throw Error('lost reactant');
+      if (b.cfg.reaction.ts_steps[0].template !== 'ts.inp') throw Error('lost TS steps');
+      b.setReactionYaml('product', '[{"step":1,"engine":"orca"}]');
+      b.setReactionYaml('scoring', '[{"step":1,"engine":"mlip","operation":"sp"}]');
+      b.setReactionYaml('ts', '[{"step":1,"engine":"qchem"}]');
+      b.setGuesser('react-ot');
+      b.setReactionYaml('command', '["python","model.py","{reactant}","{product}","{output}"]');
+      if (JSON.parse(b.reactionYaml('product'))[0].engine !== 'orca') throw Error('product');
+      if (JSON.parse(b.reactionYaml('scoring'))[0].operation !== 'sp') throw Error('scoring');
+      if (JSON.parse(b.reactionYaml('ts'))[0].engine !== 'qchem') throw Error('TS');
+      if (JSON.parse(b.reactionYaml('command')).length !== 5) throw Error('command');
+      b.setGuesser('geodesic');
+      if (b.cfg.reaction.ts_guesser.command !== undefined) throw Error('stale command');
+      b.setReactionYaml('product', '{}');
+      if (!b.flash.includes('Expected a YAML list')) throw Error('invalid branch accepted');
+      console.log('ok');
+    """)
+    assert result == "ok"
+
+
+def test_mechanism_settings_preserve_existing_steps_and_do_not_inject_a_linear_step():
+    """The GUI round-trips a mechanism without creating a conflicting top-level pipeline."""
+    result = _run_component_in_node("""
+      global.jsyaml = { dump: JSON.stringify, load: JSON.parse };
+      const b = builder();
+      b.syncYaml = () => {};
+      b.seedWorkflowDefaults = () => {};
+      b.syncExecRows = () => {};
+      b.cfg = { input: 'old.xyz', steps: [{step:1, engine:'orca', template:'ts.inp'}] };
+      b.addMechanism();
+      if (b.cfg.input !== undefined || b.cfg.steps.length) throw Error('mixed workflow');
+      if (b.cfg.mechanism.stages[0].ts_steps[0].template !== 'ts.inp') throw Error('lost steps');
+      b.refreshForm();
+      if (b.cfg.steps.length) throw Error('injected a linear step');
+      const updated = { stages: [{ name: 'second', reactant: {sources: []} }] };
+      b.setMechanismYaml(JSON.stringify(updated));
+      if (JSON.parse(b.mechanismYaml()).stages[0].name !== 'second') throw Error('lost edit');
+      b.setMechanismYaml('[]');
+      if (!b.flash.includes('stages list')) throw Error('accepted invalid mechanism');
+      console.log('ok');
+    """)
+    assert result == "ok"

@@ -1,0 +1,66 @@
+# Both products are reactive cores; supply the complete starting reactant only once.
+# Illustrative Pd oxidative addition followed by ethane reductive elimination.
+# No mechanism/barrier is certified by these starting structures.
+template_dir: ../product_core/templates
+output_dir: ./outputs
+dispatch: local
+max_cores: 1
+charge: 0
+multiplicity: 1
+executables: {orca: /path/to/orca}
+
+mechanism:
+  max_candidates: 16
+  stages:
+    - name: oxidative_addition
+      reactant:
+        sources:
+          - input: ../product_core/reactant.xyz
+        steps: &minimum
+          - step: 1
+            name: minimum
+            engine: mlip-extopt
+            template: minimum.inp
+            options: &uma
+              task_name: omol
+              model_name: uma-s-1p2
+              device: cpu
+              # Set backend_python and model_path for your local UMA installation.
+      product:
+        core:
+          input: ./oxidative_addition_core.xyz
+          anchor: 1
+          placements: 8
+        steps: *minimum
+      ts_guesser: &guesser
+        method: idpp
+        n_images: 7
+        scoring_steps:
+          - step: 1
+            engine: mlip-extopt
+            operation: sp
+            template: single_point.inp
+            options: *uma
+      ts_steps: &ts
+        - step: 1
+          name: saddle
+          engine: mlip-extopt
+          template: ts.inp
+          options: *uma
+
+    - name: reductive_elimination
+      reactant:
+        sources:
+          - from: oxidative_addition
+          # Add a new reagent explicitly using one of these forms:
+          # - smiles: N
+          # - input: ./new_reagent.xyz
+        steps: *minimum
+      product:
+        core:
+          input: ../product_core/product_core.xyz
+          anchor: 1         # One-based row in the small template, not a catalyst atom ID.
+          placements: 8
+        steps: *minimum
+      ts_guesser: *guesser
+      ts_steps: *ts

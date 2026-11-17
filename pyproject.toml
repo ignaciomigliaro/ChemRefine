@@ -56,6 +56,7 @@ dependencies = [
     "pandas>=2.2.3",
     "ase>=3.26.0",
     "rdkit>=2024.9.1",
+    "scipy>=1.11.4",
     # 2.12: the `floors` job installs the suite's extras alongside these pins, and both
     # `[mcp]` and `[agent]` require pydantic>=2.12, so any lower floor is one no
     # configuration can resolve (`pip install pydantic==2.5 'mcp>=2,<3'` is
@@ -75,6 +76,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Martinez-group molecular geodesic interpolation (IDPP uses core ASE).
+reaction = ["geodesic-interpolate>=1.0"]
+# Packaged heavy-atom mapping model. It still imports pkg_resources.
+mapping = ["rxnmapper>=0.4.3,<0.5", "setuptools<81"]
 # Flask/waitress live here only: every extra that needs the ExtOpt HTTP server or the
 # GUI cross-references `chemrefine[server]` rather than re-pinning them, so the server
 # deps have a single source of truth. Stated as the rule rather than as a list of
@@ -198,7 +203,8 @@ test = [
     # here rather than on each install line is what stops a job installing `[test]` alone
     # and collecting a suite it cannot run. `server` is named rather than left to arrive
     # via `gui`, because the extopt tests need it for their own reason.
-    "chemrefine[server,mcp,gui,agent]",
+    # Automatic reaction mapping is tested against its real packaged model.
+    "chemrefine[server,mcp,gui,agent,mapping]",
     # A Node for tests/test_gui_assets.py — `node --check` on every script the page loads
     # and `node -e` on the pure form logic, the one layer no Python gate can see. Declared
     # rather than left to whatever is on PATH because on a machine without one those tests
@@ -292,6 +298,7 @@ include = [
     "/src/chemrefine",
     "/tests",
     "/examples",
+    "/scripts/ts_guess.py",
     "/docs",
     "/mkdocs.yml",
     "/README.md",
@@ -393,7 +400,7 @@ strict = true
 # call". Excluding those packages keeps `disallow_untyped_calls` meaningful for our own
 # code — where it catches a genuinely unannotated helper — without turning every
 # `atoms.get_positions()` into an error.
-untyped_calls_exclude = ["ase", "rdkit", "pyscf", "gpu4pyscf", "pandas"]
+untyped_calls_exclude = ["ase", "rdkit", "pyscf", "gpu4pyscf", "pandas", "rxnmapper"]
 # Annotation requirements are relaxed here and re-imposed on `chemrefine.*` below, rather
 # than the other way round. Tests are worth type-checking for the calls they make *into*
 # the package — a wrong argument, a renamed keyword, a field that moved — and that needs
@@ -443,6 +450,7 @@ disallow_untyped_decorators = true
 module = [
     "ase.*",
     "rdkit.*",
+    "scipy.*",
     "pyscf.*",
     "gpu4pyscf.*",
     "mace.*",
@@ -456,6 +464,7 @@ module = [
     "flask.*",
     "waitress.*",
     "pandas.*",
+    "geodesic_interpolate.*",
 ]
 ignore_missing_imports = true
 

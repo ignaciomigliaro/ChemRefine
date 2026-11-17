@@ -2520,6 +2520,7 @@ def test_a_headless_session_gets_the_recipe_not_a_text_browser(
 ):
     """A DISPLAY-less POSIX session never calls webbrowser — lynx in the terminal is no
     browser — and the recipe names the address the user's own ssh client connected to."""
+    monkeypatch.setattr(serve_mod, "sys", types.SimpleNamespace(platform="linux"))
     created: dict[str, Any] = {}
     opened: list[str] = []
     binds: list[tuple[str, int]] = []
@@ -2538,6 +2539,7 @@ def test_a_headless_session_gets_the_recipe_not_a_text_browser(
 
 def _launch_capturing(monkeypatch: pytest.MonkeyPatch, caplog, **browser: Any) -> list[str]:
     """Run ``launch`` with everything faked out; return the URLs the browser was given."""
+    monkeypatch.setattr(serve_mod, "sys", types.SimpleNamespace(platform="linux"))
     created: dict[str, Any] = {}
     opened: list[str] = []
     binds: list[tuple[str, int]] = []
@@ -2606,6 +2608,8 @@ def test_a_session_with_no_browser_registered_at_all_opens_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """``webbrowser.get()`` raises ``Error`` when nothing is registered — that is a no."""
+
+    monkeypatch.setattr(serve_mod, "sys", types.SimpleNamespace(platform="linux"))
 
     def raise_error(*_a: Any) -> Any:
         raise webbrowser.Error("no browser")

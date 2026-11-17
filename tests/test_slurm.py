@@ -1279,7 +1279,15 @@ def _alive(pid: int) -> bool:
     try:
         state = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0]
     except (ProcessLookupError, FileNotFoundError, IndexError):
-        return False
+        # macOS has no procfs. ps also distinguishes zombies from live children.
+        result = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+        )
+        return (
+            result.returncode == 0
+            and bool(result.stdout.strip())
+            and not result.stdout.lstrip().startswith("Z")
+        )
     return state != "Z"
 
 

@@ -1,0 +1,44 @@
+# H + H2 -> H2 + H: replace these illustrative mapped endpoints for your reaction.
+template_dir: ./templates
+output_dir: ./outputs
+dispatch: local
+charge: 0
+multiplicity: 2
+max_cores: 4
+executables: {orca: /path/to/orca}
+
+reaction:
+  reactant:
+    input: ./reactant.xyz
+    steps:
+      - step: 1
+        name: reactant_minimum
+        engine: orca
+        template: minimum.inp
+  product:
+    input: ./product.xyz
+    steps:
+      - step: 1
+        name: product_minimum
+        engine: orca
+        template: minimum.inp
+  # Both minimum-preparation pipelines finish before the TS guesser runs.
+  ts_guesser:
+    method: idpp  # Or geodesic with pip install 'chemrefine[reaction]'.
+    n_images: 17
+    scoring_steps:
+      - step: 1
+        name: mlip_path_energies
+        engine: mlip
+        operation: sp
+        template: score.py
+        options: {task_name: omol, device: cpu}
+  ts_steps:
+    - step: 1
+      name: saddle
+      engine: orca
+      template: ts.inp
+    - step: 2
+      name: frequencies
+      engine: orca
+      template: freq.inp

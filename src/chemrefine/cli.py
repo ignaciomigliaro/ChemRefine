@@ -174,6 +174,43 @@ def _dispatch(
             typer.echo(
                 f"[dry-run] max_gpus={config.max_gpus if config.max_gpus is not None else 'auto'}"
             )
+            if config.mechanism is not None:
+                from rdkit import Chem
+
+                from chemrefine.mechanism import maps
+                from chemrefine.mechanism import plan as mechanism_plan
+
+                for item in mechanism_plan(config):
+                    typer.echo(
+                        f"[dry-run] reaction stage={item.stage.name} "
+                        f"TS guesser={item.stage.ts_guesser.method}"
+                    )
+                    typer.echo(f"[dry-run] stage_output_dir={item.config.output_dir}")
+                    typer.echo(f"[dry-run] atom_maps={maps(item.reactant)}")
+                    mapped = (
+                        Chem.MolToSmiles(item.reactant, allHsExplicit=True)
+                        + ">>"
+                        + Chem.MolToSmiles(item.product, allHsExplicit=True)
+                    )
+                    typer.echo(f"[dry-run] mapped_reaction={mapped}")
+                    typer.echo(
+                        f"[dry-run] mapping={item.mapping['method']} "
+                        f"confidence={item.mapping.get('confidence')}"
+                    )
+                    for source in item.stage.reactant.sources:
+                        if source.from_stage:
+                            typer.echo(
+                                f"[dry-run] carry from={source.from_stage} "
+                                f"select_smiles={source.select_smiles}"
+                            )
+            if config.reaction is not None:
+                from chemrefine.reaction import branches
+
+                typer.echo(f"[dry-run] TS guesser={config.reaction.ts_guesser.method}")
+                for name, branch in branches(config).items():
+                    typer.echo(
+                        f"[dry-run] {name}: {len(branch.steps)} step(s), input={branch.input}"
+                    )
             for step_cfg in config.steps:
                 typer.echo(
                     f"[dry-run] step {step_cfg.step}: "
@@ -531,7 +568,18 @@ def validate(
             typer.echo(f"warning [{warning.kind}] at {where}: {warning.message}")
         if report.ok:
             steps = report.config.steps if report.config is not None else ()
-            typer.echo(f"OK: {len(steps)} step(s) validated")
+            if report.config is not None and report.config.mechanism is not None:
+                typer.echo(
+                    f"OK: mechanism, {len(report.config.mechanism.stages)} "
+                    "reaction stage(s) validated"
+                )
+            elif report.config is not None and report.config.reaction is not None:
+                from chemrefine.reaction import branches
+
+                count = sum(len(b.steps) for b in branches(report.config).values())
+                typer.echo(f"OK: reaction workflow, {count} step(s) validated")
+            else:
+                typer.echo(f"OK: {len(steps)} step(s) validated")
     if not report.ok:
         raise typer.Exit(code=2)
 

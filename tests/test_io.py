@@ -1412,3 +1412,12 @@ def test_a_directory_listed_but_not_searched_still_says_what_it_holds(
         (structure_dir / "attempt1", True),
         (structure_dir / "step1_0.out", False),
     ]
+
+
+def test_umask_published_value_is_read_without_a_process_global_write(tmp_path, monkeypatch):
+    """Exercise the Linux status parser on every kernel, including macOS."""
+    status = tmp_path / "status"
+    status.write_text("Name:\tpytest\nUmask:\t0027\n")
+    monkeypatch.setattr(chemrefine_io, "_PROC_STATUS", status)
+    monkeypatch.setattr(os, "umask", lambda _: pytest.fail("changed the process umask"))
+    assert chemrefine_io._umask() == 0o027

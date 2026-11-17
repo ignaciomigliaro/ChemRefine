@@ -1,0 +1,116 @@
+{
+  "kind": "atom_mapping_preview",
+  "source": "input.yaml",
+  "stages": [
+    {
+      "name": "dehydration",
+      "reactant_atom_maps": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "product_atom_maps": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "method": "rxnmapper",
+      "backend_version": "0.4.3",
+      "confidence": 0.6726762705297193,
+      "hydrogen_transfers": [
+        {
+          "atom_map": 7,
+          "from_parents": [
+            3
+          ],
+          "to_parents": [
+            1
+          ]
+        }
+      ],
+      "hydrogen_policy": "preserve_parent_then_unambiguous_transfer",
+      "sources": [
+        {
+          "from": null,
+          "smiles": "OC(O)",
+          "atom_maps": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      ],
+      "mapped_reaction": "[O:1]([C:2]([O:3][H:7])([H:5])[H:6])[H:4]>>[C:2](=[O:3])([H:5])[H:6].[O:1]([H:4])[H:7]"
+    },
+    {
+      "name": "rehydration",
+      "reactant_atom_maps": [
+        2,
+        3,
+        5,
+        6,
+        8,
+        9,
+        10
+      ],
+      "product_atom_maps": [
+        2,
+        3,
+        5,
+        6,
+        8,
+        9,
+        10
+      ],
+      "method": "rxnmapper",
+      "backend_version": "0.4.3",
+      "confidence": 0.9496855000992965,
+      "hydrogen_transfers": [
+        {
+          "atom_map": 10,
+          "from_parents": [
+            8
+          ],
+          "to_parents": [
+            3
+          ]
+        }
+      ],
+      "hydrogen_policy": "preserve_parent_then_unambiguous_transfer",
+      "sources": [
+        {
+          "from": "dehydration",
+          "smiles": null,
+          "atom_maps": [
+            2,
+            3,
+            5,
+            6
+          ]
+        },
+        {
+          "from": null,
+          "smiles": "O",
+          "atom_maps": [
+            8,
+            9,
+            10
+          ]
+        }
+      ],
+      "mapped_reaction": "[C:2](=[O:3])([H:5])[H:6].[O:8]([H:9])[H:10]>>[C:2]([O:3][H:10])([H:5])([H:6])[O:8][H:9]"
+    }
+  ]
+}

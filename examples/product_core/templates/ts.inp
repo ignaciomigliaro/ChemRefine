@@ -1,0 +1,6 @@
+! ExtOpt OptTS NumFreq
+%geom
+ Calc_Hess true
+ NumHess true
+ MaxIter 100
+end

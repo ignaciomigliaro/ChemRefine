@@ -838,3 +838,34 @@ def test_an_unusable_seed_exits_with_the_config_error_code(tmp_path: Path, seed_
 def test_translate_legacy_argv_passes_through_on_argparse_error():
     argv = ["c.yaml", "--maxcores", "not-an-int"]  # argparse SystemExit
     assert _translate_legacy_argv(argv) == argv
+
+
+@pytest.mark.parametrize("workflow", ["reaction", "mechanism"])
+def test_reaction_workflow_dry_run_and_validation_show_branches(tmp_path, workflow):
+    """CLI previews expose the same branches and persistent maps that execution consumes."""
+    from test_mechanism import configuration
+    from test_reaction import config
+
+    cfg = configuration(tmp_path) if workflow == "mechanism" else config(tmp_path)
+    path = tmp_path / "workflow.yaml"
+    path.write_text(yaml.safe_dump(cfg.model_dump(mode="json", by_alias=True)))
+    result = runner.invoke(app, ["run", str(path), "--dry-run"])
+    assert result.exit_code == 0, result.output
+    if workflow == "mechanism":
+        assert "reaction stage=hydrate TS guesser=idpp" in result.output
+        assert "mapped_reaction=" in result.output
+        assert "mapping=provided confidence=None" in result.output
+        assert "carry from=dehydrate select_smiles=C=O" in result.output
+    else:
+        assert "TS guesser=idpp" in result.output
+        assert "reactant: 1 step(s)" in result.output
+        assert "ts: 1 step(s)" in result.output
+    assert not cfg.output_dir.exists()
+    validated = runner.invoke(app, ["validate", str(path)])
+    assert validated.exit_code == 0, validated.output
+    assert f"OK: {workflow}" in validated.output
+    assert (
+        "3 reaction stage(s)" in validated.output
+        if workflow == "mechanism"
+        else "4 step(s)" in validated.output
+    )

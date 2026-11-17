@@ -1252,3 +1252,49 @@ def test_every_template_driven_engine_declares_its_suffix() -> None:
             continue
         assert engine.template_suffix, f"{name}: TemplateDriven with an empty template_suffix"
         assert engine.label, f"{name}: TemplateDriven with an empty label"
+
+
+@pytest.mark.parametrize("engine_name", sorted(ENGINES))
+def test_reaction_adapters_preserve_engine_settings_and_resource_budgets(tmp_path, engine_name):
+    """Mechanism stages and elementary branches must hand identical settings to every engine."""
+    from chemrefine import mechanism, reaction
+    from chemrefine.config import Config, MechanismStage
+
+    step_cfg = StepConfig(
+        step=1,
+        engine=engine_name,
+        options=_REQUIRED_OPTIONS.get(engine_name, {}),
+        slurm_template="custom.header",
+    )
+    cfg = Config(
+        output_dir=tmp_path / "outputs",
+        steps=[step_cfg],
+        max_cores=8,
+        max_gpus=2,
+        charge=0,
+        multiplicity=1,
+        dispatch="local",
+        executables={"orca": "/some/bin/orca"},
+    )
+    stage = MechanismStage.model_validate(
+        {
+            "name": "reaction",
+            "charge": 1,
+            "multiplicity": 2,
+            "reactant": {"sources": [{"smiles": "[NH4+]"}], "steps": [step_cfg]},
+            "product": {"smiles": "[NH4+]", "steps": [step_cfg]},
+            "ts_guesser": {"method": "react-ot", "command": ["adapter"]},
+            "ts_steps": [step_cfg],
+        }
+    )
+    stage_cfg = mechanism.stage_config(cfg, stage)
+    for name, branch in reaction.branches(stage_cfg).items():
+        assert branch.reaction is None and branch.mechanism is None
+        assert branch.output_dir == cfg.output_dir / stage.name / name
+        assert (branch.charge, branch.multiplicity) == (1, 2)
+        assert (branch.max_cores, branch.max_gpus) == (8, 2)
+        assert branch.executables == cfg.executables and branch.dispatch == cfg.dispatch
+        assert branch.steps == ([] if name == "scoring" else [step_cfg])
+        if name != "scoring":
+            assert branch.steps[0].options == step_cfg.options
+            assert branch.steps[0].slurm_template == "custom.header"

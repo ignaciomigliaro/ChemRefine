@@ -454,9 +454,13 @@ function builder() {
         "slurm_array",
       ];
       const rank = Object.fromEntries(curated.map((key, i) => [key, i]));
-      return fieldSpecs(this.schema.config, ["steps", "executables"]).sort(
-        (a, b) => (rank[a.key] ?? 99) - (rank[b.key] ?? 99),
-      );
+      return fieldSpecs(this.schema.config, [
+        "steps",
+        "executables",
+        "reaction",
+        "mechanism",
+        ...(this.cfg.reaction || this.cfg.mechanism ? ["input"] : []),
+      ]).sort((a, b) => (rank[a.key] ?? 99) - (rank[b.key] ?? 99));
     },
     descriptorFor(step) {
       // The step's engine as the config reads it — `engine:` in any case — so a step
@@ -628,6 +632,90 @@ function builder() {
       );
     },
 
+    addMechanism() {
+      this.cfg.mechanism = {
+        stages: [
+          {
+            name: "reaction_1",
+            reactant: { sources: [{ smiles: "" }], steps: [] },
+            product: { smiles: "", steps: [] },
+            ts_guesser: { method: "idpp", scoring_steps: [{ step: 1, operation: "sp" }] },
+            ts_steps: this.cfg.steps,
+          },
+        ],
+      };
+      delete this.cfg.input;
+      this.cfg.steps = [];
+      this.rekeySteps();
+      this.syncYaml();
+    },
+    mechanismYaml() {
+      return jsyaml.dump(this.cfg.mechanism || {}, { lineWidth: 90 });
+    },
+    setMechanismYaml(text) {
+      try {
+        const value = jsyaml.load(text);
+        if (!value || typeof value !== "object" || !Array.isArray(value.stages)) {
+          throw new Error("Expected a mechanism mapping with a stages list");
+        }
+        this.cfg.mechanism = value;
+        this.flash = "";
+        this.syncYaml();
+      } catch (error) {
+        this.flash = `Mechanism settings: ${error.message}`;
+      }
+    },
+    addReaction() {
+      this.cfg.reaction = {
+        reactant: { input: this.cfg.input || "reactant.xyz", steps: [] },
+        product: { input: "product.xyz", steps: [] },
+        ts_guesser: {
+          method: "idpp",
+          n_images: 17,
+          scoring_steps: [{ step: 1, operation: "sp" }],
+        },
+        ts_steps: this.cfg.steps,
+      };
+      delete this.cfg.input;
+      this.cfg.steps = [];
+      this.rekeySteps();
+      this.syncYaml();
+    },
+    reactionYaml(section) {
+      const r = this.cfg.reaction;
+      if (!r) return "";
+      const value =
+        section === "ts"
+          ? r.ts_steps
+          : section === "scoring"
+            ? r.ts_guesser.scoring_steps
+            : section === "command"
+              ? r.ts_guesser.command
+              : r[section].steps;
+      return jsyaml.dump(value || [], { lineWidth: 90 });
+    },
+    setReactionYaml(section, text) {
+      try {
+        const value = jsyaml.load(text) || [];
+        if (!Array.isArray(value)) throw new Error("Expected a YAML list");
+        const r = this.cfg.reaction;
+        if (section === "ts") r.ts_steps = value;
+        else if (section === "scoring") r.ts_guesser.scoring_steps = value;
+        else if (section === "command") r.ts_guesser.command = value;
+        else r[section].steps = value;
+        this.flash = "";
+        this.syncYaml();
+      } catch (error) {
+        this.flash = `Reaction settings: ${error.message}`;
+      }
+    },
+    setGuesser(method) {
+      this.cfg.reaction.ts_guesser.method = method;
+      if (method === "idpp" || method === "geodesic") {
+        delete this.cfg.reaction.ts_guesser.command;
+      }
+      this.syncYaml();
+    },
     addStep() {
       // A new step takes the previous step's engine; the first one has none until you
       // choose, rather than one picked for you. No key at all rather than `undefined`:
@@ -739,7 +827,7 @@ function builder() {
     refreshForm() {
       this.seedWorkflowDefaults(); // the form shows them; the file states them
       this.rekeySteps();
-      if (!this.cfg.steps.length) this.addStep();
+      if (!this.cfg.steps.length && !this.cfg.reaction && !this.cfg.mechanism) this.addStep();
       this.syncExecRows();
     },
     async applyRaw() {

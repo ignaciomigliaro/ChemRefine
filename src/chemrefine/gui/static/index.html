@@ -138,6 +138,78 @@
       </div>
     </details>
 
+    <button type="button" x-show="!cfg.reaction && !cfg.mechanism" @click="addReaction()">
+      Set up elementary reaction (use current steps for TS refinement)
+    </button>
+    <button type="button" x-show="!cfg.reaction && !cfg.mechanism" @click="addMechanism()">
+      Set up linked reaction mechanism (use current steps for first TS refinement)
+    </button>
+    <template x-if="cfg.mechanism">
+      <section class="reaction-settings">
+        <h2>Linked reaction mechanism</h2>
+        <p class="muted">Use ordinary SMILES for reactants and complete products in each stage.
+          A source with from carries an earlier single product; select_smiles selects a molecule from multiple products. It resolves the optimized product
+          at runtime. Unselected byproducts remain in the earlier stage's record.</p>
+        <label><span>Mechanism settings (YAML mapping with stages)</span>
+          <textarea rows="28" :value="mechanismYaml()"
+            @change="setMechanismYaml($event.target.value)"></textarea>
+        </label>
+        <p class="muted">Atom identities and unambiguous hydrogen transfers are mapped automatically.
+          New reagent sources always receive fresh identities. Each stage has its own endpoint preparation,
+          TS guesser, and TS refinement steps. Validate before running.</p>
+      </section>
+    </template>
+    <template x-if="cfg.reaction">
+      <section class="reaction-settings">
+        <h2>Elementary reaction</h2>
+        <p class="muted">Supply reactant and product XYZ files with identical atom order,
+          including explicit hydrogens. Each branch numbers its steps from 1.</p>
+        <template x-for="side in ['reactant', 'product']" :key="side">
+          <div class="subform">
+            <h3 x-text="side"></h3>
+            <label><span>Input XYZ</span>
+              <input type="text" :value="cfg.reaction[side].input"
+                @change="cfg.reaction[side].input = $event.target.value; syncYaml()">
+            </label>
+            <label><span>Preparation steps (YAML list; [] uses the supplied geometry)</span>
+              <textarea rows="7" :value="reactionYaml(side)"
+                @change="setReactionYaml(side, $event.target.value)"></textarea>
+            </label>
+          </div>
+        </template>
+        <div class="subform">
+          <h3>TS guesser</h3>
+          <select @change="setGuesser($event.target.value)">
+            <template x-for="method in ['idpp', 'geodesic', 'fragmentflow', 'react-ot']" :key="method">
+              <option :value="method" :selected="cfg.reaction.ts_guesser.method === method"
+                x-text="method"></option>
+            </template>
+          </select>
+          <label><span>Path images</span>
+            <input type="number" min="3" :value="cfg.reaction.ts_guesser.n_images || 17"
+              @change="cfg.reaction.ts_guesser.n_images = Number($event.target.value); syncYaml()">
+          </label>
+          <label x-show="['fragmentflow', 'react-ot'].includes(cfg.reaction.ts_guesser.method)">
+            <span>Model wrapper command (YAML argument list)</span>
+            <textarea rows="5" :value="reactionYaml('command')"
+              @change="setReactionYaml('command', $event.target.value)"></textarea>
+          </label>
+          <p class="muted">Model wrappers write candidate XYZ frames to {output} using
+            {reactant} and {product}. Interpolation needs single-point scoring steps.</p>
+          <label><span>Single-point scoring steps (YAML list; choose engine and template)</span>
+            <textarea rows="7" :value="reactionYaml('scoring')"
+              @change="setReactionYaml('scoring', $event.target.value)"></textarea>
+          </label>
+        </div>
+        <label><span>TS refinement steps (YAML list)</span>
+          <textarea rows="10" :value="reactionYaml('ts')"
+            @change="setReactionYaml('ts', $event.target.value)"></textarea>
+        </label>
+        <p class="muted">Verify one imaginary frequency and IRC connectivity before
+          assigning a mechanism. Generated candidates alone are not verified TSs.</p>
+      </section>
+    </template>
+    <div x-show="!cfg.reaction && !cfg.mechanism">
     <h2>Steps</h2>
     <template x-for="(step, index) in cfg.steps" :key="stepKeys[index]">
       <details class="step" open>
@@ -363,6 +435,7 @@
       </details>
     </template>
     <button type="button" id="addstep" @click="addStep()">＋ Add step</button>
+    </div>
     </div>
     <!-- ============ Agent chat (local GUI; needs chemrefine[agent]) ============ -->
     <!-- A div, not a details: the panel is a tab, and #chat in style.css already

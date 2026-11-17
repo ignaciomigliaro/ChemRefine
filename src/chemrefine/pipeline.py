@@ -773,6 +773,14 @@ def run(config: Config, plan: RunPlan | None = None) -> list[StepOutcome]:
     the same ``output_dir`` raises :class:`~chemrefine.errors.RunLockError` instead of
     archiving and resubmitting this one's in-flight work.
     """
+    if config.mechanism is not None:
+        from chemrefine.mechanism import run as run_mechanism
+
+        return run_mechanism(config, plan)
+    if config.reaction is not None:
+        from chemrefine.reaction import run as run_reaction
+
+        return run_reaction(config, plan)
     plan = plan if plan is not None else RunPlan()
     with run_lock(config.output_dir):
         # Lock first, fence second: the lock answers for live *drivers*, the fence for a

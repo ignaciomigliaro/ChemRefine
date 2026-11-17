@@ -593,6 +593,248 @@ class StepConfig(BaseModel):
 
 Dispatch: TypeAlias = Literal["auto", "local", "slurm"]
 
+
+def _reaction_steps(steps: list[StepConfig]) -> list[StepConfig]:
+    """Each reaction branch has its own numbering and name namespace."""
+    if [s.step for s in steps] != list(range(1, len(steps) + 1)):
+        raise ValueError("step numbers must be a contiguous 1..N sequence")
+    names = [s.name for s in steps if s.name is not None]
+    if len(names) != len(set(names)):
+        raise ValueError("step names must be unique when provided")
+    return steps
+
+
+class ReactionEndpoint(BaseModel):
+    """One atom-mapped endpoint and its optional preparation pipeline."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    input: Annotated[Path, USER_PATH]
+    steps: list[StepConfig] = Field(default_factory=list)
+    _ordered_steps = field_validator("steps")(_reaction_steps)
+
+
+class TSGuesserConfig(BaseModel):
+    """Path interpolation or an external generative-model command adapter."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    method: Literal["idpp", "geodesic", "fragmentflow", "react-ot", "external"] = "idpp"
+    n_images: int = Field(17, ge=3)
+    command: list[str] | None = None
+    """Argument vector; {reactant}, {product}, {output}, {charge}, {multiplicity}
+    are substituted. The command must write candidate geometries to {output}."""
+    timeout_seconds: float = Field(600, gt=0, allow_inf_nan=False)
+    scoring_steps: list[StepConfig] = Field(default_factory=list)
+    """Single-point calculations on every interior image; highest energy seeds the TS."""
+    _ordered_steps = field_validator("scoring_steps")(_reaction_steps)
+
+    @model_validator(mode="after")
+    def _check_method(self) -> Self:
+        """Require a real model adapter or a fully scored interpolation path."""
+        external = self.method in ("fragmentflow", "react-ot", "external")
+        if external and (not self.command or not all(self.command)):
+            raise ValueError(f"{self.method} requires a non-empty command argument vector")
+        if not external and self.command is not None:
+            raise ValueError("command is only supported for fragmentflow, react-ot and external")
+        if not external and not self.scoring_steps:
+            raise ValueError("interpolation requires scoring_steps to select a TS guess by energy")
+        for step in self.scoring_steps:
+            if step.operation != "sp" or step.sample is not None or step.nms:
+                raise ValueError(
+                    "scoring_steps require operation: sp, no sample filter, and no NMS"
+                )
+            if step.on_failure != "stop":
+                raise ValueError(
+                    "scoring_steps require on_failure: stop so path images cannot be lost"
+                )
+        return self
+
+
+class ReactionConfig(BaseModel):
+    """An elementary reaction: prepare endpoints, guess, then refine candidate TSs."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    reactant: ReactionEndpoint
+    product: ReactionEndpoint
+    ts_guesser: TSGuesserConfig
+    ts_steps: list[StepConfig] = Field(min_length=1)
+    _ordered_steps = field_validator("ts_steps")(_reaction_steps)
+
+
+class MolecularConnectivity(BaseModel):
+    """Optional explicit connectivity using one-based XYZ rows and bond orders.
+
+    Order zero denotes a coordination bond. Charges are per-atom formal charges;
+    an XYZ file by itself does not encode charge or bond orders.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    bonds: list[tuple[int, int, Literal[0, 1, 2, 3]]] | None = None
+    formal_charges: dict[int, int] = Field(default_factory=dict)
+
+
+class ProductCore(BaseModel):
+    """A reduced product geometry whose omitted attachments are inherited at runtime."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    input: Annotated[Path, USER_PATH]
+    anchor: int = Field(1, ge=1, strict=True)
+    connectivity: MolecularConnectivity = Field(default_factory=MolecularConnectivity)
+    match: dict[int, int] = Field(default_factory=dict)
+    dissociate: list[str] = Field(default_factory=list)
+    placements: int = Field(8, ge=1, le=16, strict=True)
+
+
+class MechanismSource(BaseModel):
+    """A fresh reagent molecule or a runtime selection from an earlier product."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+    smiles: str | None = None
+    input: Annotated[Path | None, USER_PATH] = None
+    input_dir: Annotated[Path | None, USER_PATH] = None
+    connectivity: MolecularConnectivity = Field(default_factory=MolecularConnectivity)
+    charge: int = 0
+    from_stage: str | None = Field(None, alias="from")
+    select_smiles: str | None = Field(None, min_length=1)
+    select: Literal["metal_complex"] | None = None
+    select_index: int | None = Field(None, ge=0, strict=True)
+
+    @model_validator(mode="after")
+    def _check_source(self) -> Self:
+        """Keep embedded/file-backed reagents distinct from deferred product selections."""
+        if self.input_dir is not None and any(
+            value is not None for value in (self.smiles, self.input, self.from_stage)
+        ):
+            raise ValueError("input_dir cannot include smiles, input, or from")
+        if self.from_stage is not None:
+            if self.select is not None and self.select_smiles is not None:
+                raise ValueError("use either select or select_smiles")
+            if (
+                self.smiles is not None
+                or self.input is not None
+                or self.connectivity != MolecularConnectivity()
+                or self.charge != 0
+            ):
+                raise ValueError("from cannot include smiles or input")
+        elif (
+            not (self.smiles or self.input or self.input_dir)
+            or self.select_smiles is not None
+            or self.select is not None
+            or self.select_index is not None
+        ):
+            raise ValueError("a new reagent requires smiles or input; select_smiles requires from")
+        if self.smiles is not None and (
+            self.connectivity != MolecularConnectivity() or self.charge
+        ):
+            raise ValueError(
+                "SMILES defines connectivity and charge; metadata is for XYZ-only sources"
+            )
+        return self
+
+
+class MechanismReactant(BaseModel):
+    """Assemble reactants from ordinary SMILES and carried optimized molecules."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    sources: list[MechanismSource] = Field(min_length=1)
+    input: Annotated[Path | None, USER_PATH] = None
+    steps: list[StepConfig] = Field(default_factory=list)
+    _ordered_steps = field_validator("steps")(_reaction_steps)
+
+
+class MechanismProduct(BaseModel):
+    """The complete atom-balanced product graph, including byproducts."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    smiles: str | None = Field(None, min_length=1)
+    input: Annotated[Path | None, USER_PATH] = None
+    connectivity: MolecularConnectivity = Field(default_factory=MolecularConnectivity)
+    core: ProductCore | None = None
+    steps: list[StepConfig] = Field(default_factory=list)
+    _ordered_steps = field_validator("steps")(_reaction_steps)
+
+    @model_validator(mode="after")
+    def _check_product(self) -> Self:
+        """Keep complete endpoints and reduced product templates mutually exclusive."""
+        if self.core is not None:
+            if self.smiles is not None or self.input is not None:
+                raise ValueError("product core cannot include complete smiles or input")
+            if self.connectivity != MolecularConnectivity():
+                raise ValueError("set reduced connectivity inside product.core")
+        elif self.smiles is None and self.input is None:
+            raise ValueError("product requires smiles, input, or core")
+        if self.smiles is not None and self.connectivity != MolecularConnectivity():
+            raise ValueError("SMILES defines product connectivity")
+        return self
+
+
+class MechanismStage(BaseModel):
+    """One elementary reaction in an explicitly specified sequence."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    name: str
+    charge: int | None = None
+    multiplicity: int | None = Field(None, ge=1)
+    reactant: MechanismReactant
+    product: MechanismProduct
+    ts_guesser: TSGuesserConfig
+    ts_steps: list[StepConfig] = Field(min_length=1)
+    _ordered_steps = field_validator("ts_steps")(_reaction_steps)
+
+    @field_validator("name")
+    @classmethod
+    def _safe_stage_name(cls, value: str) -> str:
+        """Stage names become output directories, so accept one safe path component."""
+        if not _NAME_RE.fullmatch(value) or value in {"guesser", "_inputs"}:
+            raise ValueError("stage name must contain only letters, digits, underscores or hyphens")
+        return value
+
+
+class MechanismVariantOverride(BaseModel):
+    """Explicit contact-validation exceptions for one directory variant, by filename stem."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    force: bool | None = Field(None, strict=True)
+    force_endpoint_contacts: bool | None = Field(None, strict=True)
+
+
+class MechanismConfig(BaseModel):
+    """A sequential mechanism with deterministic SMILES geometry generation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    stages: list[MechanismStage] = Field(min_length=1)
+    conformers: int = Field(8, ge=1, le=100)
+    seed: int = Field(42, ge=0, le=2147483647)
+    fragment_gap_angstrom: float = Field(3.0, gt=0, allow_inf_nan=False)
+    min_mapping_confidence: float = Field(0.0, ge=0, le=1, allow_inf_nan=False)
+    max_candidates: int = Field(16, ge=1, strict=True)
+    parallel_runs: int = Field(1, ge=1, strict=True)
+    max_variants: int = Field(64, ge=1, strict=True)
+    force: bool = Field(False, strict=True)
+    """Allow changed metal contacts at runtime; ordinary bonds and atom identities stay checked."""
+    force_endpoint_contacts: bool = Field(False, strict=True)
+    """Explicit broader override of contact topology in metal-containing endpoints."""
+    variant_overrides: dict[str, MechanismVariantOverride] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_dependencies(self) -> Self:
+        """Only earlier products can be referenced, and each stage owns a unique directory."""
+        if self.variant_overrides and not any(
+            source.input_dir is not None
+            for stage in self.stages
+            for source in stage.reactant.sources
+        ):
+            raise ValueError("variant_overrides requires a directory source")
+        seen: set[str] = set()
+        for stage in self.stages:
+            if stage.name in seen:
+                raise ValueError(f"duplicate mechanism stage name {stage.name!r}")
+            for source in stage.reactant.sources:
+                if source.from_stage is not None and source.from_stage not in seen:
+                    raise ValueError(f"stage {stage.name!r}: from must name an earlier stage")
+            seen.add(stage.name)
+        return self
+
+
 #: Characters that cannot survive interpolation into the generated bash. ``"``, ``$`` and
 #: a backtick end a quoted string or start a command substitution; a backslash is refused
 #: because inside double quotes it escapes the very characters above, which is enough to
@@ -768,7 +1010,9 @@ class Config(BaseModel):
     they are facts about the machine, not about a step: one install serves every step that
     uses it. Every value here is held to the same shell-safety rule and warned about when it
     names an absent path, whatever kind of path it is."""
-    steps: list[StepConfig]
+    steps: list[StepConfig] = Field(default_factory=list)
+    reaction: ReactionConfig | None = None
+    mechanism: MechanismConfig | None = None
 
     @field_validator("template_dir", "output_dir", "scratch_dir")
     @classmethod
@@ -823,8 +1067,6 @@ class Config(BaseModel):
     @classmethod
     def _check_contiguous_steps(cls, v: list[StepConfig]) -> list[StepConfig]:
         """Ensure ``step:`` numbers form a contiguous 1..N sequence."""
-        if not v:
-            raise ValueError("'steps' must contain at least one step")
         numbers = [s.step for s in v]
         expected = list(range(1, len(numbers) + 1))
         if numbers != expected:
@@ -837,6 +1079,20 @@ class Config(BaseModel):
         names = [s.name for s in self.steps if s.name is not None]
         if len(names) != len(set(names)):
             raise ValueError("step names must be unique when provided")
+        return self
+
+    @model_validator(mode="after")
+    def _check_workflow(self) -> Self:
+        """Select one workflow mode without silently ignoring inputs or steps."""
+        if self.reaction is not None and self.mechanism is not None:
+            raise ValueError("set only one of reaction or mechanism")
+        if self.reaction is not None or self.mechanism is not None:
+            if self.steps or self.input is not None:
+                raise ValueError(
+                    "reaction/mechanism workflows use branches; omit top-level input and steps"
+                )
+        elif not self.steps:
+            raise ValueError("'steps' must contain at least one step")
         return self
 
     def missing_executables(self) -> list[tuple[str, str]]:
@@ -977,7 +1233,7 @@ def resolve_relative_paths(cfg: Config, *, base: Path) -> Config:
     that judged paths against a different directory than the run would is a report about a
     different config.
     """
-    updates: dict[str, Path | list[StepConfig]] = {}
+    updates: dict[str, Any] = {}
     if not cfg.template_dir.is_absolute():
         updates["template_dir"] = base / cfg.template_dir
     if not cfg.output_dir.is_absolute():
@@ -986,6 +1242,82 @@ def resolve_relative_paths(cfg: Config, *, base: Path) -> Config:
         updates["scratch_dir"] = base / cfg.scratch_dir
     if cfg.input is not None and not cfg.input.is_absolute():
         updates["input"] = base / cfg.input
+    if cfg.reaction is not None:
+        reaction = cfg.reaction
+        endpoints = {}
+        for name in ("reactant", "product"):
+            endpoint = getattr(reaction, name)
+            path = endpoint.input
+            endpoints[name] = endpoint.model_copy(
+                update={
+                    "input": path if path.is_absolute() else base / path,
+                    "steps": [_resolve_step_option_paths(s, base=base) for s in endpoint.steps],
+                }
+            )
+        updates["reaction"] = reaction.model_copy(
+            update={
+                **endpoints,
+                "ts_steps": [_resolve_step_option_paths(s, base=base) for s in reaction.ts_steps],
+                "ts_guesser": reaction.ts_guesser.model_copy(
+                    update={
+                        "scoring_steps": [
+                            _resolve_step_option_paths(s, base=base)
+                            for s in reaction.ts_guesser.scoring_steps
+                        ],
+                    }
+                ),
+            }
+        )
+    if cfg.mechanism is not None:
+
+        def anchored(path: Path | None) -> Path | None:
+            return path if path is None or path.is_absolute() else base / path
+
+        def resolved_steps(steps: list[StepConfig]) -> list[StepConfig]:
+            return [_resolve_step_option_paths(s, base=base) for s in steps]
+
+        stages = []
+        for stage in cfg.mechanism.stages:
+            sources = [
+                source.model_copy(
+                    update={
+                        "input": anchored(source.input),
+                        "input_dir": anchored(source.input_dir),
+                    }
+                )
+                for source in stage.reactant.sources
+            ]
+            stages.append(
+                stage.model_copy(
+                    update={
+                        "reactant": stage.reactant.model_copy(
+                            update={
+                                "input": anchored(stage.reactant.input),
+                                "sources": sources,
+                                "steps": resolved_steps(stage.reactant.steps),
+                            }
+                        ),
+                        "product": stage.product.model_copy(
+                            update={
+                                "input": anchored(stage.product.input),
+                                "core": stage.product.core.model_copy(
+                                    update={"input": anchored(stage.product.core.input)}
+                                )
+                                if stage.product.core is not None
+                                else None,
+                                "steps": resolved_steps(stage.product.steps),
+                            }
+                        ),
+                        "ts_steps": resolved_steps(stage.ts_steps),
+                        "ts_guesser": stage.ts_guesser.model_copy(
+                            update={
+                                "scoring_steps": resolved_steps(stage.ts_guesser.scoring_steps),
+                            }
+                        ),
+                    }
+                )
+            )
+        updates["mechanism"] = cfg.mechanism.model_copy(update={"stages": stages})
     steps = [_resolve_step_option_paths(step, base=base) for step in cfg.steps]
     if any(new is not old for new, old in zip(steps, cfg.steps, strict=True)):
         updates["steps"] = steps

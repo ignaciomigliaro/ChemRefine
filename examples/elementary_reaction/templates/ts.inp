@@ -1,0 +1,5 @@
+! PBE def2-SVP OptTS TightSCF
+%geom
+  Calc_Hess true
+  Recalc_Hess 5
+end

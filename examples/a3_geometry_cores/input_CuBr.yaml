@@ -1,0 +1,151 @@
+template_dir: templates
+output_dir: outputs_CuBr
+charge: -1
+multiplicity: 1
+max_cores: 1
+slurm_template: cpu.slurm.header
+slurm_array: false
+dispatch: local
+executables:
+  orca: /path/to/orca
+steps: []
+mechanism:
+  stages:
+  - name: h_abstraction
+    charge: -1
+    multiplicity: 1
+    reactant:
+      sources:
+      - input: inputs/reactant_CuBr.xyz
+        charge: -1
+      steps: &id001
+      - step: 1
+        name: uma_minimum_freq
+        engine: mlip-extopt
+        template: minimum.inp
+        options:
+          task_name: omol
+          model_name: uma-s-1p2
+          device: cpu
+          gradient_timeout_seconds: 600
+        nms: false
+        on_failure: stop
+    product:
+      core:
+        input: inputs/deprotonated_pi_core.xyz
+        anchor: 1
+        match: {}
+        dissociate: []
+        placements: 8
+      steps: *id001
+    ts_guesser: &id002
+      method: idpp
+      n_images: 9
+      timeout_seconds: 600.0
+      scoring_steps:
+      - step: 1
+        name: uma_energy
+        engine: mlip-extopt
+        operation: sp
+        template: single_point.inp
+        options:
+          task_name: omol
+          model_name: uma-s-1p2
+          device: cpu
+          gradient_timeout_seconds: 600
+        nms: false
+        on_failure: stop
+    ts_steps: &id003
+    - step: 1
+      name: uma_ts_freq
+      engine: mlip-extopt
+      template: ts.inp
+      options:
+        task_name: omol
+        model_name: uma-s-1p2
+        device: cpu
+        gradient_timeout_seconds: 600
+      nms: false
+      on_failure: stop
+  - name: sigma_rearrangement
+    charge: -1
+    multiplicity: 1
+    reactant:
+      sources:
+      - charge: 0
+        from_stage: h_abstraction
+        select: metal_complex
+      steps: *id001
+    product:
+      core:
+        input: inputs/sigma_core.xyz
+        anchor: 1
+        match: {}
+        dissociate: []
+        placements: 8
+      steps: *id001
+    ts_guesser: *id002
+    ts_steps: *id003
+  - name: cc_addition
+    charge: -1
+    multiplicity: 1
+    reactant:
+      sources:
+      - charge: 0
+        from_stage: sigma_rearrangement
+      - input: inputs/methanimine.xyz
+        charge: 0
+      steps: *id001
+    product:
+      core:
+        input: inputs/cc_product_core.xyz
+        anchor: 1
+        match: {}
+        dissociate: []
+        placements: 8
+      steps:
+      - step: 1
+        name: uma_minimum_freq
+        engine: mlip-extopt
+        template: minimum.inp
+        options:
+          task_name: omol
+          model_name: uma-s-1p2
+          device: cpu
+          gradient_timeout_seconds: 600
+        nms: false
+        on_failure: stop
+    ts_guesser:
+      method: idpp
+      n_images: 15
+      timeout_seconds: 600.0
+      scoring_steps:
+      - step: 1
+        name: uma_energy
+        engine: mlip-extopt
+        operation: sp
+        template: single_point.inp
+        options:
+          task_name: omol
+          model_name: uma-s-1p2
+          device: cpu
+          gradient_timeout_seconds: 600
+        nms: false
+        on_failure: stop
+    ts_steps:
+    - step: 1
+      name: uma_ts_freq
+      engine: mlip-extopt
+      template: ts_cc.inp
+      options:
+        task_name: omol
+        model_name: uma-s-1p2
+        device: cpu
+        gradient_timeout_seconds: 600
+      nms: false
+      on_failure: stop
+  conformers: 8
+  seed: 42
+  fragment_gap_angstrom: 3.0
+  min_mapping_confidence: 0.0
+  max_candidates: 16

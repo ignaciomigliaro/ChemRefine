@@ -327,6 +327,13 @@ def execute(
     would delete state the first is about to reuse. ``pipeline.run`` acquires the same
     lock reentrantly, so a caller driving it directly is equally guarded.
     """
+    if config.reaction is not None or config.mechanism is not None:
+        if action not in (Action.RUN, Action.RESUME) or target is not None:
+            raise ConfigError("reaction workflows support whole-workflow run and resume")
+        pipeline.run(
+            config, RunPlan(default=(StepMode.EXECUTE if action == Action.RUN else StepMode.RESUME))
+        )
+        return 0
     handler = _HANDLERS.get(action)
     if handler is None:
         raise ChemRefineError(f"unknown action: {action!r}")
