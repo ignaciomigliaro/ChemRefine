@@ -127,6 +127,8 @@ omitted catalyst ligands and substrate substituents. See the
 [mechanism guide](docs/tutorials/linked-reactions.md) and
 [example](examples/linked_reactions/input.yaml), or the
 [all-core mechanism](examples/product_core_from_start/input.yaml).
+Separate catalyst and reagent files can also be assembled with an initial
+coordination core; see the [three-alkyne example](examples/a3_initial_core).
 
 ## Citation
 

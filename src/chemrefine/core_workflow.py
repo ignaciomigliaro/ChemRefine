@@ -14,7 +14,7 @@ from typing import Any, cast
 
 from rdkit import Chem
 
-from chemrefine import atom_mapping, mechanism, product_core, reaction
+from chemrefine import atom_mapping, initial_core, mechanism, product_core, reaction
 from chemrefine.config import Config, MechanismConfig, MechanismStage
 from chemrefine.errors import ConfigError
 
@@ -248,26 +248,40 @@ def plan(config: Config) -> list[mechanism.StagePlan]:
                 if source.from_stage is not None
                 for identity in mechanism.maps(graph)
             }
-            for product, mapping in _products(
-                config, stage, reactant, aliases, ambiguous_aliases, carried_ids
-            ):
-                concrete = stage.model_copy(
-                    update={"reactant": stage.reactant.model_copy(update={"sources": declarations})}
-                )
-                planned.append(
-                    (
-                        concrete,
+            initial_options: list[tuple[Any, dict[str, Any]]] = [(reactant, {})]
+            if stage.reactant.initial_core is not None:
+                initial_options = [
+                    (graph, {"initial_core": info})
+                    for graph, info in initial_core.plan(
                         reactant,
-                        product,
-                        tuple(sources),
-                        {
-                            **mapping,
-                            "sources": allocations,
-                            "logical_stage": stage.name,
-                            "lineage": lineage.copy(),
-                        },
+                        stage.reactant.initial_core,
+                        max_candidates=settings.max_candidates,
                     )
-                )
+                ]
+            for assembled_graph, initial_mapping in initial_options:
+                for product, mapping in _products(
+                    config, stage, assembled_graph, aliases, ambiguous_aliases, carried_ids
+                ):
+                    concrete = stage.model_copy(
+                        update={
+                            "reactant": stage.reactant.model_copy(update={"sources": declarations})
+                        }
+                    )
+                    planned.append(
+                        (
+                            concrete,
+                            assembled_graph,
+                            product,
+                            tuple(sources),
+                            {
+                                **mapping,
+                                **initial_mapping,
+                                "sources": allocations,
+                                "logical_stage": stage.name,
+                                "lineage": lineage.copy(),
+                            },
+                        )
+                    )
         if len(planned) > settings.max_candidates:
             raise ConfigError(
                 f"stage {stage.name} exceeds max_candidates={settings.max_candidates}"

@@ -220,6 +220,9 @@ def validate_config_text(text: str, *, base_dir: Path | None = None) -> Validati
                 )
             paths = [
                 item.stage.reactant.input,
+                item.stage.reactant.initial_core.input
+                if item.stage.reactant.initial_core is not None
+                else None,
                 item.stage.product.input,
                 item.stage.product.core.input if item.stage.product.core is not None else None,
                 *(s.input for s in item.stage.reactant.sources),

@@ -325,11 +325,14 @@ def match_core(
     dissociate: list[str],
     max_candidates: int,
     anchor_ids: set[int] | None = None,
+    coordination_only: bool = False,
 ) -> list[CoreMatch]:
     """Find element-conserving bindings, quotienting exact graph symmetries.
 
     Hints bind one-based core rows to persistent reactant identities. A bounded
     search refuses unresolved combinatorics instead of silently truncating chemistry.
+    Initial-core callers use coordination_only to preserve source bonds and charges,
+    allowing only new inter-fragment metal coordination, including no-op placements.
     """
     count = core.GetNumAtoms()
     if count > reactant.GetNumAtoms() or (anchor is not None and not 0 <= anchor < count):
@@ -364,6 +367,11 @@ def match_core(
     )
     original = _edges(reactant)
     target = _edges(core)
+    components = {
+        index: ordinal
+        for ordinal, group in enumerate(Chem.GetMolFrags(reactant))
+        for index in group
+    }
     assignment: dict[int, int] = {}
     best = np.inf
     results: dict[str, CoreMatch] = {}
@@ -394,14 +402,27 @@ def match_core(
             edits = sum(
                 original.get(edge) != changed.get(edge) for edge in original.keys() | changed.keys()
             )
-            if anchor is not None and edits == 0:
+            if anchor is not None and edits == 0 and not coordination_only:
                 return
             if anchor is None and edits > best:
                 return
             product = Chem.RWMol(reactant)
             for i, index in enumerate(indices):
                 atom = core.GetAtomWithIdx(i)
-                if anchor is None or atom.HasProp("formal_charge_explicit"):
+                # Mixed XYZ sources can establish an isolated reagent's charge
+                # without establishing the complex's electronic structure. Once
+                # chemistry changes its bonds (OH- -> water, for example), an
+                # inferred charge cannot remain pinned to that source atom.
+                if (
+                    anchor is None
+                    or atom.HasProp("formal_charge_explicit")
+                    or (
+                        not coordination_only
+                        and reactant.HasProp("connectivity_only")
+                        and reactant.GetBoolProp("connectivity_only")
+                        and not reactant.GetAtomWithIdx(index).HasProp("formal_charge_explicit")
+                    )
+                ):
                     product.GetAtomWithIdx(index).SetFormalCharge(atom.GetFormalCharge())
                 if anchor is None:
                     product.GetAtomWithIdx(index).SetChiralTag(atom.GetChiralTag())
@@ -450,6 +471,29 @@ def match_core(
         for index in possible:
             if index in assignment.values():
                 continue
+            if coordination_only:
+                # Initial placement may add inter-fragment metal coordination,
+                # but cannot transfer H, edit reagent bonds, or close a chelate.
+                if any(
+                    original.get((min(index, other), max(index, other)))
+                    != target.get((min(row, core_row), max(row, core_row)))
+                    and not (
+                        components[index] != components[other]
+                        and target.get((min(row, core_row), max(row, core_row)))
+                        == Chem.BondType.DATIVE
+                        and (
+                            is_metal(core.GetAtomWithIdx(row).GetAtomicNum())
+                            or is_metal(core.GetAtomWithIdx(core_row).GetAtomicNum())
+                        )
+                    )
+                    for core_row, other in assignment.items()
+                ):
+                    continue
+                atom = core.GetAtomWithIdx(row)
+                if atom.HasProp("formal_charge_explicit") and atom.GetFormalCharge() != (
+                    reactant.GetAtomWithIdx(index).GetFormalCharge()
+                ):
+                    continue
             assignment[row] = index
             marked = _unlabelled(reactant)
             for core_row, source_row in assignment.items():
@@ -583,8 +627,11 @@ def bind_geometry(graph: Any, atoms: Atoms, *, label: str) -> Atoms:
     raise ConfigError(f"{label}: XYZ correspondence is missing")
 
 
-def _fit(source: Any, target: Any) -> tuple[Any, Any]:
-    """Return a proper rigid least-squares rotation and translation for row vectors."""
+def fit_rigid(source: Any, target: Any) -> tuple[Any, Any]:
+    """Return a proper rigid least-squares rotation and translation for row vectors.
+
+    Public because initial_core shares the same source-to-template fitting operation.
+    """
     first, second = np.mean(source, axis=0), np.mean(target, axis=0)
     u, _, vt = np.linalg.svd((source - first).T @ (target - second))
     sign = np.linalg.det(u @ vt)
@@ -618,7 +665,7 @@ def assemble(
     )
     fixed = np.array(indices)
     free = np.array([i for i in range(len(reactant)) if i not in indices], dtype=int)
-    rotation, translation = _fit(reactant.positions[fixed], core_atoms.positions)
+    rotation, translation = fit_rigid(reactant.positions[fixed], core_atoms.positions)
     initial = reactant.positions @ rotation + translation
     initial[fixed] = core_atoms.positions
     cut = Chem.RWMol(product)
@@ -650,7 +697,7 @@ def assemble(
                     if index in indices and product.GetBondBetweenAtoms(anchor, index) is not None:
                         guides.add(index)
             guide_rows = sorted(guides)
-            r, _ = _fit(reactant.positions[guide_rows], initial[guide_rows])
+            r, _ = fit_rigid(reactant.positions[guide_rows], initial[guide_rows])
             # Guide bond lengths may change. Fit translation to the actual
             # attachment sites, keeping the inherited boundary bonds intact.
             t = initial[attached].mean(axis=0) - reactant.positions[attached].mean(axis=0) @ r
@@ -708,7 +755,7 @@ def assemble(
                         direction = np.array(
                             [np.sqrt(1 - z * z) * np.cos(phi), np.sqrt(1 - z * z) * np.sin(phi), z]
                         )
-                        r, t = _fit(
+                        r, t = fit_rigid(
                             np.array([center, center + axis]),
                             np.array([center, center + direction]),
                         )

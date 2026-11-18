@@ -20,7 +20,16 @@ from ase.build import minimize_rotation_and_translation
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds, rdDistGeom, rdForceFieldHelpers
 
-from chemrefine import atom_mapping, io, mechanism_report, pipeline, product_core, reaction, slurm
+from chemrefine import (
+    atom_mapping,
+    initial_core,
+    io,
+    mechanism_report,
+    pipeline,
+    product_core,
+    reaction,
+    slurm,
+)
 from chemrefine.config import Config, MechanismStage, ReactionConfig
 from chemrefine.engines import preflight_backends, preflight_steps
 from chemrefine.errors import ConfigError
@@ -220,6 +229,7 @@ def plan(config: Config) -> list[StagePlan]:
         ]
     if any(
         stage.product.core is not None
+        or stage.reactant.initial_core is not None
         or stage.product.smiles is None
         or any(
             source.smiles is None and source.from_stage is None for source in stage.reactant.sources
@@ -669,6 +679,35 @@ def run(config: Config, run_plan: RunPlan | None = None) -> list[StepOutcome]:
             else:
                 assembled = _place(source_atoms, settings.fragment_gap_angstrom)
                 reactant_atoms = assembled[np.argsort(source_maps)]
+            if stage.reactant.initial_core is not None:
+                source_graph = Chem.Mol(item.sources[0])
+                for graph in item.sources[1:]:
+                    source_graph = Chem.CombineMols(source_graph, graph)
+                reactant_atoms, candidates, scores = initial_core.assemble(
+                    reactant_atoms,
+                    ordered(source_graph),
+                    item.reactant,
+                    item.mapping["initial_core"],
+                    stage.reactant.initial_core,
+                )
+                io.write_tree_file(
+                    directory / "initial_assembly_candidates.xyz",
+                    "".join(io.plain_xyz_text(a) for a in candidates),
+                    atomic=True,
+                )
+                io.write_tree_file(
+                    directory / "initial_assembly.json",
+                    json.dumps(
+                        {
+                            **item.mapping["initial_core"],
+                            "placement_scores": scores,
+                            "selected_placement": int(np.argmin(scores)),
+                            "score_kind": "rigid-fragment geometric penalty, not electronic energy",
+                        },
+                        indent=2,
+                    ),
+                    atomic=True,
+                )
             if stage.product.core is not None:
                 core = stage.product.core
                 core_atoms = Atoms(

@@ -276,7 +276,7 @@ def test_dissociation_refuses_invalid_or_partial_ligands(tmp_path, selector):
 def test_proper_rigid_fit_cannot_reflect_chirality():
     source = np.array([[0.0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
     target = source * [-1, 1, 1] + [2, 3, 4]
-    rotation, _ = product_core._fit(source, target)
+    rotation, _ = product_core.fit_rigid(source, target)
     assert np.linalg.det(rotation) == pytest.approx(1.0)
 
 

@@ -31,6 +31,12 @@ for those and the full map.
 
 ### Added
 
+- **Initial coordination cores for separate reactants.** `reactant.initial_core`
+  assembles intact catalyst, substrate and reagent sources around a reduced XYZ
+  template, including directory batches. It preserves source geometry, adds only
+  inter-fragment metal coordination and records candidate placements and atom
+  correspondence. See `examples/a3_initial_core` for a three-alkyne CuCl2 batch.
+
 - **A per-step gradient timeout for the ExtOpt engines.** `gradient_timeout_seconds`
   (default `600`) bounds one call of the bridge ORCA invokes per geometry, where v1.3.1's
   wrapper waited on its server indefinitely. Expiry is recorded as a timeout that names

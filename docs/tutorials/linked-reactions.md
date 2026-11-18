@@ -460,6 +460,50 @@ collection from cached results without submitting unchanged calculations.
 
 <a id="complete-a-later-product-from-a-small-core"></a>
 
+## Assemble separate reactants with an initial core
+
+Use `reactant.initial_core` to construct a coordinated starting complex from
+separate catalyst, substrate and reagent sources. In a stage's reactant declaration:
+
+```yaml
+reactant:
+  sources:
+    - input: ./catalysts/CuCl2.xyz
+      charge: 0
+    - input_dir: ./alkynes
+      charge: 0
+    - input: ./hydroxide.xyz
+      charge: -1
+  initial_core:
+    input: ./pi_core.xyz
+    anchor: 1
+    placements: 8
+```
+
+The full source files supply every atom; the core supplies a small target
+arrangement. The core's metal is a placeholder for the matched source metal.
+Core matching preserves all existing source bonds and charges and may add only
+metal coordination between previously separate fragments. It cannot perform
+proton transfer, organic bond edits or ligand dissociation. Every connected
+source fragment needs at least one atom in the initial core. Include the
+hydroxide O/H and terminal alkyne H when their approach geometry matters.
+
+Assembly moves and rotates each connected source fragment rigidly, retaining its
+internal geometry. Core targets allow at most 0.15 Å fitting deviation. Unresolved
+orientations are sampled up to `placements`; selection uses geometric fit and
+clash penalties, not electronic energies. All resulting contacts are validated.
+Chemically distinct matches branch like product-core matches, and `match` hints
+can narrow ambiguous correspondences. A complete `reactant.input` override and
+`initial_core` are mutually exclusive. Product cores remain independent and
+continue to define the subsequent chemistry.
+
+Inspect the generated `initial_assembly_candidates.xyz`, `initial_assembly.json`
+and `_inputs/reactant.xyz` before interpreting optimized results. Initial-core
+coordinates and settings participate in cache identity. The
+[separate-source A3 example](https://github.com/sterling-group/ChemRefine/tree/main/examples/a3_initial_core)
+runs three terminal alkynes with one catalyst, one hydroxide source and one
+shared initial pi-coordination core.
+
 ## Product cores from the first stage
 
 Any stage can supply `product.core` instead of a complete product SMILES or

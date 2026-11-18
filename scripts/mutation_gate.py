@@ -87,6 +87,14 @@ class Mutation:
 
 _BUNDLED: tuple[Mutation, ...] = (
     Mutation(
+        id="mechanism-initial-core-preserves-source-chemistry",
+        path="src/chemrefine/product_core.py",
+        old="if coordination_only:",
+        new="if False:",
+        tests="tests/test_initial_core.py",
+        breaks="an initial placement transfers H or edits reagent bonds before the reaction",
+    ),
+    Mutation(
         id="mechanism-product-core-starting-anchor-comes-from-reactants",
         path="src/chemrefine/core_workflow.py",
         old="anchor_ids=carried_ids or set(mechanism.maps(reactant)),",

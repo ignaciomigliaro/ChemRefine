@@ -673,7 +673,7 @@ class MolecularConnectivity(BaseModel):
 
 
 class ProductCore(BaseModel):
-    """A reduced product geometry whose omitted attachments are inherited at runtime."""
+    """A reduced endpoint geometry whose omitted attachments are inherited at runtime."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     input: Annotated[Path, USER_PATH]
@@ -732,13 +732,24 @@ class MechanismSource(BaseModel):
 
 
 class MechanismReactant(BaseModel):
-    """Assemble reactants from ordinary SMILES and carried optimized molecules."""
+    """Assemble sources, optionally using a reduced initial coordination geometry."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     sources: list[MechanismSource] = Field(min_length=1)
     input: Annotated[Path | None, USER_PATH] = None
+    initial_core: ProductCore | None = None
     steps: list[StepConfig] = Field(default_factory=list)
     _ordered_steps = field_validator("steps")(_reaction_steps)
+
+    @model_validator(mode="after")
+    def _check_initial_core(self) -> Self:
+        """Initial assembly coordinates sources without dissociating their atoms."""
+        if self.initial_core is not None:
+            if self.input is not None:
+                raise ValueError("reactant initial_core cannot include a complete input")
+            if self.initial_core.dissociate:
+                raise ValueError("reactant initial_core cannot dissociate source ligands")
+        return self
 
 
 class MechanismProduct(BaseModel):
@@ -1293,6 +1304,11 @@ def resolve_relative_paths(cfg: Config, *, base: Path) -> Config:
                         "reactant": stage.reactant.model_copy(
                             update={
                                 "input": anchored(stage.reactant.input),
+                                "initial_core": stage.reactant.initial_core.model_copy(
+                                    update={"input": anchored(stage.reactant.initial_core.input)}
+                                )
+                                if stage.reactant.initial_core is not None
+                                else None,
                                 "sources": sources,
                                 "steps": resolved_steps(stage.reactant.steps),
                             }
